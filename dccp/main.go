@@ -5,13 +5,51 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"io"
 	"log"
+	"math/rand"
 	"slices"
 	"strconv"
+	"strings"
+	"time"
 
 	dc "github.com/leogem2003/directchan"
 )
+
+const (
+	TAR_COMPRESS = "tar -cf"
+	TAR_EXTRACT = "tar -xf"
+)
+
+type FileInfo struct {
+  Name    string      `json:"name"`
+	Size    int64       `json:"size"`
+	Mode    os.FileMode `json:"mode"`
+	ModTime time.Time   `json:"mod_time"`
+	IsDir   bool        `json:"is_dir"`
+}
+
+func CloneInfo(info os.FileInfo) FileInfo {
+	return FileInfo {
+		Name:    info.Name(),
+		Size:    info.Size(),
+		Mode:    info.Mode(),
+		ModTime: info.ModTime(),
+		IsDir:   info.IsDir(),
+	}
+}
+
+func PathJoin(parts []string) string {
+	return strings.Join(parts, string(os.PathSeparator))
+}
+func GetTmpName(suffix []string) string {
+	l := make([]string, len(suffix)+1, len(suffix)+1)
+	l[0] = os.TempDir()
+	suffix[len(suffix)-1] += strconv.Itoa(rand.Intn(1024))
+	l = append(l, suffix...)
+	return PathJoin(l)
+}
 
 func main() {
 	flag.Parse()
@@ -45,7 +83,8 @@ func main() {
 
 	log.Print("Opening connection")
 	conn, err := dc.FromSettings(settings)
-	// defer conn.CloseAll()
+	defer conn.CloseAll()
+
 	log.Print("Opened")
 
 	if err != nil {
@@ -63,18 +102,35 @@ func main() {
 	}
 }
 
-func Receive(c *dc.Connection, path string) error {
-	size, err := strconv.Atoi(string(<-c.Out))
+func Receive(c *dc.Connection, basePath string) error {
+	info := new(FileInfo)
+	err := json.Unmarshal(<-c.Out, info)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("receiving %d bytes", size)
-	file, err := os.Create(path)
+	path := PathJoin([]string{basePath, info.Name})
+	log.Printf("Writing file to %s", path)
+
+	size := info.Size
+
+	log.Printf("Receiving %d bytes", size)
+
+	var file *os.File
+	var tarPath string
+	if info.IsDir {
+		tarPath = GetTmpName([]string{info.Name+".tar"})
+		log.Printf("Created tmp tar in %s", tarPath)
+		file, err = os.Create(tarPath)
+	} else {
+		file, err = os.Create(path)
+	}
+
+	defer file.Close()
+
 	if err != nil {
 		return err
 	}
-	defer file.Close()
 	
 	received := 0
 	for chunk := range c.Out {
@@ -86,11 +142,21 @@ func Receive(c *dc.Connection, path string) error {
 			return err
 		}
 
-		if received == size {
+		if int64(received) == size {
 			break
 		}
 	}
-	
+
+	if info.IsDir {
+		log.Printf("Extracting tar to %s", path)
+		cmd := strings.Join([]string{TAR_EXTRACT, tarPath, "-C", path}, " ")
+		log.Println(cmd)
+		proc := exec.Command("tar", "-xf", tarPath, "-C", basePath)
+		if err := proc.Run(); err != nil {
+			return err
+		}
+	}
+
 	c.In <- []byte("ACK")
 	log.Printf("Sent ACK")
 	return nil
@@ -98,20 +164,54 @@ func Receive(c *dc.Connection, path string) error {
 
 
 func Send(c *dc.Connection, path string) error {
-	log.Print("sending bytes... ")	
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	info, err := os.Stat(path)
+	osInfo, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
 	
-	log.Printf("total bytes: %d", info.Size())
-	c.In <- []byte(strconv.Itoa(int(info.Size())))
+	info := CloneInfo(osInfo)
+	
+	var file *os.File
+	if info.IsDir {
+		// directory:
+		// keep original information, but info.Size is the size of the
+		// tar file
+		log.Print("Directory detected")
+
+		// TODO random string in the name to avoid clashes
+		tarPath := GetTmpName([]string{info.Name+".tar"})
+		cmd := strings.Join([]string{TAR_COMPRESS, tarPath, path}, " ")
+		log.Print(cmd)
+		proc := exec.Command("tar", "-cf", tarPath, path)
+		if err := proc.Run(); err != nil {
+			return err
+		}
+
+		file, err = os.Open(tarPath)
+		if err != nil {
+			return err
+		}
+		finfo, err := os.Stat(tarPath)
+		if err != nil {
+			return err
+		}
+		info.Size = finfo.Size()
+	} else {
+		file, err = os.Open(path)
+	}
+
+	defer file.Close()	
+	if err != nil {
+		return err
+	}
+
+	log.Printf("total bytes: %d", info.Size)
+	infoBytes, err := json.Marshal(info)
+	if err != nil {
+		return err
+	}
+
+	c.In <- infoBytes
 	buf := make([]byte, 1024)	
 	for {
 		n, err := file.Read(buf)

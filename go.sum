@@ -6,6 +6,8 @@ github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aN
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/leogem2003/directchan v0.1.1 h1:rAeuOT0yV31362izlOPA4TUxpHvEsFEGeAcNiLwmVbk=
 github.com/leogem2003/directchan v0.1.1/go.mod h1:TLEtENzP8JcLK+QPePvg4mUCs8IxAMuSi1UNVT3tHIM=
+github.com/leogem2003/directchan v0.1.2 h1:3ZS4VmllKN4uaHixu2KQI05UevJb31UAa8iN+fxh6EA=
+github.com/leogem2003/directchan v0.1.2/go.mod h1:TLEtENzP8JcLK+QPePvg4mUCs8IxAMuSi1UNVT3tHIM=
 github.com/pion/datachannel v1.5.10 h1:ly0Q26K1i6ZkGf42W7D4hQYR90pZwzFOjTq5AuCKk4o=
 github.com/pion/datachannel v1.5.10/go.mod h1:p/jJfC9arb29W7WrxyKbepTU20CFgyx5oLo8Rs4Py/M=
 github.com/pion/dtls/v3 v3.0.7 h1:bItXtTYYhZwkPFk4t1n3Kkf5TDrfj6+4wG+CZR8uI9Q=

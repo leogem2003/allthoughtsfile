@@ -2,7 +2,7 @@ module github.com/leogem2003/allthoughtsfiles
 
 go 1.24.5
 
-require github.com/leogem2003/directchan v0.1.1
+require github.com/leogem2003/directchan v0.1.2
 
 require (
 	github.com/google/uuid v1.6.0 // indirect
