@@ -8,69 +8,48 @@ import (
 	"os/exec"
 	"io"
 	"log"
-	"math/rand"
 	"slices"
-	"strconv"
-	"strings"
-	"time"
 
 	dc "github.com/leogem2003/directchan"
+	atf "github.com/leogem2003/allthoughtsfiles"
 )
 
-const (
-	TAR_COMPRESS = "tar -cf"
-	TAR_EXTRACT = "tar -xf"
-)
+var errorLog = log.New(os.Stderr, "ERROR: ", 0)
 
-type FileInfo struct {
-  Name    string      `json:"name"`
-	Size    int64       `json:"size"`
-	Mode    os.FileMode `json:"mode"`
-	ModTime time.Time   `json:"mod_time"`
-	IsDir   bool        `json:"is_dir"`
-}
-
-func CloneInfo(info os.FileInfo) FileInfo {
-	return FileInfo {
-		Name:    info.Name(),
-		Size:    info.Size(),
-		Mode:    info.Mode(),
-		ModTime: info.ModTime(),
-		IsDir:   info.IsDir(),
-	}
-}
-
-func PathJoin(parts []string) string {
-	return strings.Join(parts, string(os.PathSeparator))
-}
-func GetTmpName(suffix []string) string {
-	l := make([]string, len(suffix)+1, len(suffix)+1)
-	l[0] = os.TempDir()
-	suffix[len(suffix)-1] += strconv.Itoa(rand.Intn(1024))
-	l = append(l, suffix...)
-	return PathJoin(l)
+var Usage = func() {
+	fmt.Fprintf(os.Stderr, "Usage of %s: %s (send|recv) <file>\n", os.Args[0], os.Args[0])
+	flag.PrintDefaults() 
 }
 
 func main() {
+	var settingsPath string
+	var debug bool
+
+	atf.SettingsFlag(&settingsPath)
+	atf.DebugFlag(&debug)
+
+	flag.Usage = Usage
 	flag.Parse()
+	
 	op := flag.Arg(0)
 	target := flag.Arg(1)
 	settings := new(dc.ConnectionSettings) 
+	atf.SetDebugMode(debug)
 
-	file, err := os.Open("settings.json")
+	file, err := os.Open(settingsPath)
 	if err != nil {
-		log.Fatalf("Failed to open file: %v", err)
+		errorLog.Fatalf("Failed to read settings: %v", err)
 	}
 	defer file.Close()
 
 	// Read the file contents
 	bytes, err := io.ReadAll(file)
 	if err != nil {
-		log.Fatalf("Failed to read file: %v", err)
+		errorLog.Fatalf("Failed to read file: %v", err)
 	}
 
 	if err := json.Unmarshal(bytes, settings); err != nil {
-		log.Fatalf("Failed to unmarshal JSON: %v", err)
+		errorLog.Fatalf("Failed to unmarshal JSON: %v", err)
 	}
 	
 	if op == "recv" { // answer
@@ -78,7 +57,7 @@ func main() {
 	} else if op == "send" { 
 		settings.Operation = 0 // offer
 	} else {
-		log.Fatalf("Expected 'recv' or 'send', got %s", op)
+		errorLog.Fatalf("Expected 'recv' or 'send', got %s", op)
 	}
 
 	log.Print("Opening connection")
@@ -88,7 +67,7 @@ func main() {
 	log.Print("Opened")
 
 	if err != nil {
-		log.Fatalf("Error initializing the connection: %v", err)
+		errorLog.Fatalf("Error initializing the connection: %v", err)
 	}
 	
 	if settings.Operation == 1 {
@@ -98,28 +77,28 @@ func main() {
 	}
 
 	if err != nil {
-		log.Fatalf("Error while IO: %v", err)
+		errorLog.Fatalf("Error while IO: %v", err)
 	}
 }
 
 func Receive(c *dc.Connection, basePath string) error {
-	info := new(FileInfo)
+	info := new(atf.FileInfo)
 	err := json.Unmarshal(<-c.Out, info)
 	if err != nil {
 		return err
 	}
 
-	path := PathJoin([]string{basePath, info.Name})
+	path := atf.PathJoin([]string{basePath, info.Name})
 	log.Printf("Writing file to %s", path)
 
 	size := info.Size
 
-	log.Printf("Receiving %d bytes", size)
+	log.Printf("Received %5d bytes", size)
 
 	var file *os.File
 	var tarPath string
 	if info.IsDir {
-		tarPath = GetTmpName([]string{info.Name+".tar"})
+		tarPath = atf.GetTmpName([]string{info.Name+".tar"})
 		log.Printf("Created tmp tar in %s", tarPath)
 		file, err = os.Create(tarPath)
 	} else {
@@ -149,8 +128,6 @@ func Receive(c *dc.Connection, basePath string) error {
 
 	if info.IsDir {
 		log.Printf("Extracting tar to %s", path)
-		cmd := strings.Join([]string{TAR_EXTRACT, tarPath, "-C", path}, " ")
-		log.Println(cmd)
 		proc := exec.Command("tar", "-xf", tarPath, "-C", basePath)
 		if err := proc.Run(); err != nil {
 			return err
@@ -169,7 +146,7 @@ func Send(c *dc.Connection, path string) error {
 		return err
 	}
 	
-	info := CloneInfo(osInfo)
+	info := atf.CloneInfo(osInfo)
 	
 	var file *os.File
 	if info.IsDir {
@@ -178,10 +155,7 @@ func Send(c *dc.Connection, path string) error {
 		// tar file
 		log.Print("Directory detected")
 
-		// TODO random string in the name to avoid clashes
-		tarPath := GetTmpName([]string{info.Name+".tar"})
-		cmd := strings.Join([]string{TAR_COMPRESS, tarPath, path}, " ")
-		log.Print(cmd)
+		tarPath := atf.GetTmpName([]string{info.Name+".tar"})
 		proc := exec.Command("tar", "-cf", tarPath, path)
 		if err := proc.Run(); err != nil {
 			return err
