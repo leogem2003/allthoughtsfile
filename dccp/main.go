@@ -24,9 +24,11 @@ var Usage = func() {
 func main() {
 	var settingsPath string
 	var debug bool
+	var aes string
 
 	atf.SettingsFlag(&settingsPath)
 	atf.DebugFlag(&debug)
+	atf.AESFlag(&aes)
 
 	flag.Usage = Usage
 	flag.Parse()
@@ -42,6 +44,24 @@ func main() {
 	}
 	defer file.Close()
 
+	var cypher *dc.AESGCM
+	if aes != "" {
+		file, err := os.Open(aes)
+		if err != nil {
+			errorLog.Fatalf("Failed to open file: %v", err)
+		}
+		key, err := io.ReadAll(file)
+		if err != nil {
+			errorLog.Fatalf("Failed to read key file: %v", err)
+		}
+		cypher, err = dc.NewAESGCM(key)
+		if err != nil {
+			errorLog.Fatalf("Error while creating AES cypher: %v", err)
+		}
+	} else {
+		cypher = nil
+	}
+
 	// Read the file contents
 	bytes, err := io.ReadAll(file)
 	if err != nil {
@@ -51,12 +71,8 @@ func main() {
 	if err := json.Unmarshal(bytes, settings); err != nil {
 		errorLog.Fatalf("Failed to unmarshal JSON: %v", err)
 	}
-	
-	if op == "recv" { // answer
-		settings.Operation = 1
-	} else if op == "send" { 
-		settings.Operation = 0 // offer
-	} else {
+
+	if op != "send" && op != "recv" { 
 		errorLog.Fatalf("Expected 'recv' or 'send', got %s", op)
 	}
 
@@ -70,10 +86,10 @@ func main() {
 		errorLog.Fatalf("Error initializing the connection: %v", err)
 	}
 	
-	if settings.Operation == 1 {
-		err = Receive(conn, target)
+	if op == "recv" {
+		err = Receive(conn, target, cypher)
 	} else {
-		err = Send(conn, target)
+		err = Send(conn, target, cypher)
 	}
 
 	if err != nil {
@@ -81,7 +97,7 @@ func main() {
 	}
 }
 
-func Receive(c *dc.Connection, basePath string) error {
+func Receive(c *dc.Connection, basePath string, cypher *dc.AESGCM) error {
 	info := new(atf.FileInfo)
 	err := json.Unmarshal(<-c.Out, info)
 	if err != nil {
@@ -113,14 +129,22 @@ func Receive(c *dc.Connection, basePath string) error {
 	
 	received := 0
 	for chunk := range c.Out {
+		log.Printf("Received chunk of %3d bytes", len(chunk))
+		if cypher != nil {
+			nonce := chunk[:cypher.NonceSize()]
+			chunk, err = cypher.Decrypt(chunk[cypher.NonceSize():], nonce, nil)
+			if err != nil {
+				return err
+			}
+		}
 		received += len(chunk)
-		log.Printf("Receiving chunk %4d/%4d bytes", received, size)
+
 		_, err := file.Write(chunk)
 		if err != nil {
 			c.In <- []byte("KO")
 			return err
 		}
-
+		
 		if int64(received) == size {
 			break
 		}
@@ -140,7 +164,7 @@ func Receive(c *dc.Connection, basePath string) error {
 }
 
 
-func Send(c *dc.Connection, path string) error {
+func Send(c *dc.Connection, path string, cypher *dc.AESGCM) error {
 	osInfo, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -196,7 +220,16 @@ func Send(c *dc.Connection, path string) error {
 			return err
 		}
 		log.Printf("Sent slice of %5d bytes", n)
-		c.In <- slices.Clone(buf[:n])
+		chunk := slices.Clone(buf[:n])
+		if cypher != nil {
+			nonce := cypher.GenerateNonce()
+			chunk, err = cypher.Encrypt(chunk, nonce, nil)
+			if err != nil {
+				return err
+			}
+			chunk = slices.Concat(nonce, chunk)
+		}
+		c.In <- chunk
 	}
 
 	if res := string(<-c.Out); res != "ACK" {

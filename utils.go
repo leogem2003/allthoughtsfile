@@ -17,7 +17,7 @@ func PathJoin(parts []string) string {
 // Create a temporary directory containing suffix with a random number added
 // Structure: <os_tempdir>/<suffix||random>
 func GetTmpName(suffix []string) string {
-	l := make([]string, len(suffix)+1, len(suffix)+1)
+	l := make([]string, 1, len(suffix)+1)
 	l[0] = os.TempDir()
 	suffix[len(suffix)-1] += strconv.Itoa(rand.Intn(1024))
 	l = append(l, suffix...)
@@ -35,6 +35,9 @@ func DebugFlag(target *bool) {
 	flag.BoolVar(target, "debug", false, "enable debugging")
 }
 
+func AESFlag(target *string) {
+	flag.StringVar(target, "aes", "", "AES key file")
+}
 
 func SetDebugMode(debug bool) {
 	if debug {
