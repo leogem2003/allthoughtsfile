@@ -80,6 +80,12 @@ func main() {
 	conn, err := dc.FromSettings(settings)
 	defer conn.CloseAll()
 
+	go func() {
+		for {
+			log.Printf("state changed: %v \n", <-conn.State)
+		}
+	}()
+
 	log.Print("Opened")
 
 	if err != nil {
