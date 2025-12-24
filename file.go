@@ -1,6 +1,8 @@
 package atf
 
 import (
+	"encoding/binary"
+	"hash/fnv"
 	"time"
 	"os"
 )
@@ -23,8 +25,21 @@ func CloneInfo(info os.FileInfo) FileInfo {
 	}
 }
 
-//TODO implement
-func (f FileInfo) Hash() uint64 {
-	panic("Not implemented")
-	return 0
+func (i FileInfo) Hash() uint64 {
+    h := fnv.New64a()
+
+    h.Write([]byte(i.Name))
+
+    binary.Write(h, binary.LittleEndian, i.Size)
+    binary.Write(h, binary.LittleEndian, int64(i.Mode))
+
+    binary.Write(h, binary.LittleEndian, i.ModTime.UnixNano())
+
+    if i.IsDir {
+        h.Write([]byte{1})
+    } else {
+        h.Write([]byte{0})
+    }
+
+    return h.Sum64()
 }

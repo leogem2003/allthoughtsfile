@@ -1,6 +1,7 @@
 package atf
 import (
 	"flag"
+	"hash/fnv"
 	"io"
 	"log"
 	"math/rand"
@@ -45,4 +46,10 @@ func SetDebugMode(debug bool) {
 	} else {
 		log.SetOutput(io.Discard)
 	}
+}
+
+func HashString(s string) uint64 {
+    h := fnv.New64a()
+    h.Write([]byte(s))
+    return h.Sum64()
 }
