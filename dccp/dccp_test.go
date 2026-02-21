@@ -294,3 +294,34 @@ func TestCLI(t *testing.T) {
 	os.RemoveAll(root2)
 	os.RemoveAll(settingsPath)
 }
+
+func TestAES(t *testing.T) {
+	root1 := atf.GetTmpName([]string{"dccp", "test_cli", "src"})
+	atf.MakePlayground(root1, []string{"f1.txt", "key"})
+	root2 := atf.GetTmpName([]string{"dccp", "test_cli", "dest"})
+	atf.MakePlayground(root2, []string{""})
+
+	filePath := filepath.Join(root1, "f1.txt")
+	os.WriteFile(filePath, []byte("hello"), 0644)
+	
+	key := dc.CreateKey(32)
+	keyPath := filepath.Join(root1, "key")
+	os.WriteFile(keyPath, key, 0644)
+
+	settingsPath, err := atf.MakeSettings("dccp")
+	if err != nil {
+		t.Fatalf("Error while writing settings: %v", err)
+	}
+
+	arg1 := []string{"run", "main.go",
+		"--debug", "--settings", settingsPath, "--aes", keyPath,  "send", filePath}
+	arg2 := []string{"run", "main.go",
+		"--debug", "--settings", settingsPath, "--aes", keyPath, "recv", root2}
+	atf.RunPrg(arg1,arg2,t)
+	os.Remove(keyPath)
+	atf.CheckEqual(root1,root2,t)	
+	
+	os.RemoveAll(root1)
+	os.RemoveAll(root2)
+	os.RemoveAll(settingsPath)
+}
