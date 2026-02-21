@@ -67,8 +67,12 @@ func TestExcludeDots(t *testing.T) {
 
 	expectedExcludeFiles := []string {"a","a/b","a/b/file.txt", "a/.b", "a/.b/file.txt"}
 	tmpExcFiles := makeTmp(tmp, expectedExcludeFiles)
+	
+	expectedExcludeSuffix := []string{"a", "a/b", "a/.b"}
+	tmpExcSuffix := makeTmp(tmp, expectedExcludeSuffix)
 
 	testPolicy(IgnoreDot, tmpTot, tmpExcDots, "IgnoreDot", t)
 	testPolicy(IgnoreDotFolders, tmpTot, tmpExcDirs, "IgnoreDotFolders", t)
 	testPolicy(IgnoreDotFiles, tmpTot, tmpExcFiles, "IgnoreDotFiles", t)
+	testPolicy(MakeIgnoreSuffix("file.txt"), tmpTot, tmpExcSuffix, "ExcludeSuffix", t)
 }

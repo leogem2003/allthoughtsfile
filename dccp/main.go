@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"os"
-	"os/exec"
 	"io"
 	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 
 	dc "github.com/leogem2003/directchan"
@@ -42,25 +43,8 @@ func main() {
 	if err != nil {
 		errorLog.Fatalf("Failed to read settings: %v", err)
 	}
-	defer file.Close()
 
-	var cypher *dc.AESGCM
-	if aes != "" {
-		file, err := os.Open(aes)
-		if err != nil {
-			errorLog.Fatalf("Failed to open file: %v", err)
-		}
-		key, err := io.ReadAll(file)
-		if err != nil {
-			errorLog.Fatalf("Failed to read key file: %v", err)
-		}
-		cypher, err = dc.NewAESGCM(key)
-		if err != nil {
-			errorLog.Fatalf("Error while creating AES cypher: %v", err)
-		}
-	} else {
-		cypher = nil
-	}
+	defer file.Close()
 
 	// Read the file contents
 	bytes, err := io.ReadAll(file)
@@ -80,6 +64,26 @@ func main() {
 	conn, err := dc.FromSettings(settings)
 	defer conn.CloseAll()
 
+	var channel dc.IOChannel
+	if aes != "" {
+		file, err := os.Open(aes)
+		if err != nil {
+			errorLog.Fatalf("Failed to open file: %v", err)
+		}
+		key, err := io.ReadAll(file)
+		if err != nil {
+			errorLog.Fatalf("Failed to read key file: %v", err)
+		}
+		file.Close()
+		cypher, err := dc.NewAESGCM(key)
+		if err != nil {
+			errorLog.Fatalf("Error while creating AES cypher: %v", err)
+		}
+		channel = dc.NewAESConnection(conn, cypher)
+	} else {
+		channel = conn
+	}
+
 	go func() {
 		for {
 			log.Printf("state changed: %v \n", <-conn.State)
@@ -93,9 +97,9 @@ func main() {
 	}
 	
 	if op == "recv" {
-		err = Receive(conn, target, cypher)
+		err = Receive(channel, target)
 	} else {
-		err = Send(conn, target, cypher)
+		err = Send(channel, target)
 	}
 
 	if err != nil {
@@ -103,14 +107,14 @@ func main() {
 	}
 }
 
-func Receive(c *dc.Connection, basePath string, cypher *dc.AESGCM) error {
+func Receive(c dc.IOChannel, basePath string) error {
 	info := new(atf.FileInfo)
-	err := json.Unmarshal(<-c.Out, info)
+	err := json.Unmarshal(c.Recv(), info)
 	if err != nil {
 		return err
 	}
 
-	path := atf.PathJoin([]string{basePath, info.Name})
+	path := filepath.Join(basePath, info.Name)
 	log.Printf("Writing file to %s", path)
 
 	size := info.Size
@@ -134,20 +138,14 @@ func Receive(c *dc.Connection, basePath string, cypher *dc.AESGCM) error {
 	}
 	
 	received := 0
-	for chunk := range c.Out {
+	for {
+		chunk := c.Recv()
 		log.Printf("Received chunk of %3d bytes", len(chunk))
-		if cypher != nil {
-			nonce := chunk[:cypher.NonceSize()]
-			chunk, err = cypher.Decrypt(chunk[cypher.NonceSize():], nonce, nil)
-			if err != nil {
-				return err
-			}
-		}
 		received += len(chunk)
 
 		_, err := file.Write(chunk)
 		if err != nil {
-			c.In <- []byte("KO")
+			c.Send([]byte("KO"))
 			return err
 		}
 		
@@ -164,13 +162,13 @@ func Receive(c *dc.Connection, basePath string, cypher *dc.AESGCM) error {
 		}
 	}
 
-	c.In <- []byte("ACK")
+	c.Send([]byte("ACK"))
 	log.Printf("Sent ACK")
 	return nil
 }
 
 
-func Send(c *dc.Connection, path string, cypher *dc.AESGCM) error {
+func Send(c dc.IOChannel, path string) error {
 	osInfo, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -215,7 +213,7 @@ func Send(c *dc.Connection, path string, cypher *dc.AESGCM) error {
 		return err
 	}
 
-	c.In <- infoBytes
+	c.Send(infoBytes)
 	buf := make([]byte, 1024)	
 	for {
 		n, err := file.Read(buf)
@@ -227,18 +225,10 @@ func Send(c *dc.Connection, path string, cypher *dc.AESGCM) error {
 		}
 		log.Printf("Sent slice of %5d bytes", n)
 		chunk := slices.Clone(buf[:n])
-		if cypher != nil {
-			nonce := cypher.GenerateNonce()
-			chunk, err = cypher.Encrypt(chunk, nonce, nil)
-			if err != nil {
-				return err
-			}
-			chunk = slices.Concat(nonce, chunk)
-		}
-		c.In <- chunk
+		c.Send(chunk)
 	}
 
-	if res := string(<-c.Out); res != "ACK" {
+	if res := string(c.Recv()); res != "ACK" {
 		return fmt.Errorf("Expected ACK, got %s", res)
 	}
 	log.Printf("Received ACK")

@@ -3,8 +3,9 @@ import (
 	"log"
 	"math/rand"
 	"os"
-	"testing"
+	"path/filepath"
 	"slices"
+	"testing"
 
 	dc "github.com/leogem2003/directchan"
 	// server "github.com/leogem2003/directchan/server"
@@ -16,13 +17,7 @@ import (
 
 func TestFile(t *testing.T) {
 	const port = "8080"
-	settings1 := dc.ConnectionSettings{
-		Signaling:"ws://0.0.0.0:"+port,
-		STUN:[]string{"stun:stun.l.google.com:19302"},
-		Key:"ab",
-		BufferSize:1024,
-	}
-	settings2 := dc.ConnectionSettings{
+	settings := dc.ConnectionSettings{
 		Signaling:"ws://0.0.0.0:"+port,
 		STUN:[]string{"stun:stun.l.google.com:19302"},
 		Key:"ab",
@@ -34,9 +29,9 @@ func TestFile(t *testing.T) {
 
 	// create file in random tmp	
 	in_dir := atf.GetTmpName([]string{"dccp_test"})
-	input_path := atf.PathJoin([]string{in_dir, "input.txt"})	
+	input_path := filepath.Join(in_dir, "input.txt")	
 	out_dir := atf.GetTmpName([]string{"dccp_test_out"})
-	output_path := atf.PathJoin([]string{out_dir, "input.txt"})
+	output_path := filepath.Join(out_dir, "input.txt")
 
 	if err := os.MkdirAll(in_dir, 0755); err != nil {
 		t.Errorf("Error while creating direcory %v, %v", in_dir, err)
@@ -57,7 +52,7 @@ func TestFile(t *testing.T) {
 	go func() {
 		sync<-true
 		log.Println("creating sender channel")
-		conn1, err := dc.FromSettings(&settings1)
+		conn1, err := dc.FromSettings(&settings)
 		defer conn1.CloseAll()
 
 		if err != nil {
@@ -65,7 +60,7 @@ func TestFile(t *testing.T) {
 			return
 		}
 		sync <- true
-		err = dccp.Send(conn1, input_path, nil)
+		err = dccp.Send(conn1, input_path)
 		if err != nil {
 			t.Errorf("Error while sending: %v", err)
 		}
@@ -74,7 +69,7 @@ func TestFile(t *testing.T) {
 
 	<-sync
 
-	conn2, err := dc.FromSettings(&settings2)
+	conn2, err := dc.FromSettings(&settings)
 	defer conn2.CloseAll()
 	if err != nil {
 		t.Errorf("Error while opening the recv channel: %v", err)
@@ -82,7 +77,7 @@ func TestFile(t *testing.T) {
 	}
 
 	<-sync
-	err = dccp.Receive(conn2, out_dir, nil)
+	err = dccp.Receive(conn2, out_dir)
 	if err != nil {
 		t.Errorf("Error while receiving: %v", err)
 	}
@@ -104,19 +99,12 @@ func TestFile(t *testing.T) {
 
 func TestDir(t *testing.T) {
 	const port = "8080"
-	settings1 := dc.ConnectionSettings{
+	settings := dc.ConnectionSettings{
 		Signaling:"ws://0.0.0.0:"+port,
 		STUN:[]string{"stun:stun.l.google.com:19302"},
 		Key:"cd",
 		BufferSize:1024,
 	}
-	settings2 := dc.ConnectionSettings{
-		Signaling:"ws://0.0.0.0:"+port,
-		STUN:[]string{"stun:stun.l.google.com:19302"},
-		Key:"cd",
-		BufferSize:1024,
-	}
-
 	atf.SetDebugMode(true)
 	sync := make(chan bool, 1)
 
@@ -144,7 +132,7 @@ func TestDir(t *testing.T) {
 	go func() {
 		sync<-true
 		log.Println("creating sender channel")
-		conn1, err := dc.FromSettings(&settings1)
+		conn1, err := dc.FromSettings(&settings)
 		defer conn1.CloseAll()
 
 		if err != nil {
@@ -152,7 +140,7 @@ func TestDir(t *testing.T) {
 			return
 		}
 		sync <- true
-		err = dccp.Send(conn1, in_dir, nil)
+		err = dccp.Send(conn1, in_dir)
 		if err != nil {
 			t.Errorf("Error while sending: %v", err)
 		}
@@ -161,7 +149,7 @@ func TestDir(t *testing.T) {
 
 	<-sync
 
-	conn2, err := dc.FromSettings(&settings2)
+	conn2, err := dc.FromSettings(&settings)
 	defer conn2.CloseAll()
 	if err != nil {
 		t.Errorf("Error while opening the recv channel: %v", err)
@@ -169,7 +157,7 @@ func TestDir(t *testing.T) {
 	}
 
 	<-sync
-	err = dccp.Receive(conn2, out_dir, nil)
+	err = dccp.Receive(conn2, out_dir)
 	if err != nil {
 		t.Errorf("Error while receiving: %v", err)
 	}
@@ -194,13 +182,7 @@ func TestDir(t *testing.T) {
 
 func TestCrypt(t *testing.T) {
 	const port = "8080"
-	settings1 := dc.ConnectionSettings{
-		Signaling:"ws://0.0.0.0:"+port,
-		STUN:[]string{"stun:stun.l.google.com:19302"},
-		Key:"ab",
-		BufferSize:1024,
-	}
-	settings2 := dc.ConnectionSettings{
+	settings := dc.ConnectionSettings{
 		Signaling:"ws://0.0.0.0:"+port,
 		STUN:[]string{"stun:stun.l.google.com:19302"},
 		Key:"ab",
@@ -241,15 +223,16 @@ func TestCrypt(t *testing.T) {
 	go func() {
 		sync<-true
 		log.Println("creating sender channel")
-		conn1, err := dc.FromSettings(&settings1)
+		conn1, err := dc.FromSettings(&settings)
 		defer conn1.CloseAll()
 
 		if err != nil {
 			t.Errorf("Error while opening sender channel: %v", err)
 			return
 		}
+		chann := dc.NewAESConnection(conn1, cypher)
 		sync <- true
-		err = dccp.Send(conn1, input_path, cypher)
+		err = dccp.Send(chann, input_path)
 		if err != nil {
 			t.Errorf("Error while sending: %v", err)
 		}
@@ -258,15 +241,15 @@ func TestCrypt(t *testing.T) {
 
 	<-sync
 
-	conn2, err := dc.FromSettings(&settings2)
+	conn2, err := dc.FromSettings(&settings)
 	defer conn2.CloseAll()
 	if err != nil {
 		t.Errorf("Error while opening the recv channel: %v", err)
 		return
 	}
-
+	chann := dc.NewAESConnection(conn2, cypher)
 	<-sync
-	err = dccp.Receive(conn2, out_dir, cypher)
+	err = dccp.Receive(chann, out_dir)
 	if err != nil {
 		t.Errorf("Error while receiving: %v", err)
 	}
@@ -286,4 +269,28 @@ func TestCrypt(t *testing.T) {
 	os.RemoveAll(out_dir)
 }
 
+func TestCLI(t *testing.T) {
+	root1 := atf.GetTmpName([]string{"dccp", "test_cli", "src"})
+	atf.MakePlayground(root1, []string{"f1.txt"})
+	root2 := atf.GetTmpName([]string{"dccp", "test_cli", "dest"})
+	atf.MakePlayground(root2, []string{""})
 
+	filePath := filepath.Join(root1, "f1.txt")
+	os.WriteFile(filePath, []byte("hello"), 0644)
+
+	settingsPath, err := atf.MakeSettings("dccp")
+	if err != nil {
+		t.Fatalf("Error while writing settings: %v", err)
+	}
+
+	arg1 := []string{"run", "main.go",
+		"--debug", "--settings", settingsPath, "send", filePath}
+	arg2 := []string{"run", "main.go",
+		"--debug", "--settings", settingsPath, "recv", root2}
+	atf.RunPrg(arg1,arg2,t)
+	atf.CheckEqual(root1,root2,t)	
+	
+	os.RemoveAll(root1)
+	os.RemoveAll(root2)
+	os.RemoveAll(settingsPath)
+}

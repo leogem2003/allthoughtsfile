@@ -1,7 +1,6 @@
 package atf
 
 import (
-	"os"
 	"reflect"
 	"slices"
 	"testing"
@@ -11,33 +10,17 @@ import (
 func TestStatCreation(t *testing.T) {
 	SetDebugMode(true)
 	in_dir := GetTmpName([]string{"stat_test"})
-	f1 := PathJoin([]string{in_dir, "f1.txt"})
-	d1 := PathJoin([]string{in_dir, "d1"})
-	f2 := PathJoin([]string{in_dir, "d1", "f2.txt"})
+	f1 := "f1.txt"
+	d1 := "d1"
+	f2 := PathJoin([]string{"d1", "f2.txt"})
 
-	if err := os.MkdirAll(d1, 0755); err != nil {
-		t.Errorf("Error while creating direcory %v, %v", in_dir, err)
-		return
-	}
-
-	if err := os.WriteFile(f1, []byte(""), 0755); err != nil {
-		t.Errorf("Error while creating file %v, %v", f1, err)
-		return
-	}
-
-	if err := os.WriteFile(f2, []byte(""), 0700); err != nil {
-		t.Errorf("Error while creating file %v, %v", f2, err)
-		return
-	}
+	MakePlayground(in_dir, []string{f1, f2})
 
 	stats, err := CreateStats(in_dir, func(s string) bool {return true})
 	if err != nil {
 		t.Errorf("Unexpected error while creating stats %v", err)
 		return
 	}
-	if _, ok := stats[in_dir]; !ok {
-		t.Errorf("%s not found in stats", in_dir)
-	} 
 	
 	if _, ok := stats[f1]; !ok {
 		t.Errorf("%s not found in stats", f1)

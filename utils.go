@@ -53,3 +53,15 @@ func HashString(s string) uint64 {
     h.Write([]byte(s))
     return h.Sum64()
 }
+
+func RemovePrefix(p string, l []string) []string {
+	result := make([]string, len(l))
+	for i, s := range l {
+		if strings.HasPrefix(s, p) {
+			result[i] = s[len(p):]
+		} else {
+			result[i] = s
+		}
+	}
+	return result
+}

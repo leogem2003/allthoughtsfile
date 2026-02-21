@@ -8,11 +8,11 @@ import (
 )
 
 type FileInfo struct {
-  Name    string      `json:"name"`
-	Size    int64       `json:"size"`
-	Mode    os.FileMode `json:"mode"`
-	ModTime time.Time   `json:"mod_time"`
-	IsDir   bool        `json:"is_dir"`
+  Name     string      `json:"name"`
+	Size     int64       `json:"size"`
+	Mode     os.FileMode `json:"mode"`
+	ModTime  time.Time   `json:"mod_time"`
+	IsDir    bool        `json:"is_dir"`
 }
 
 func CloneInfo(info os.FileInfo) FileInfo {
@@ -20,7 +20,7 @@ func CloneInfo(info os.FileInfo) FileInfo {
 		Name:    info.Name(),
 		Size:    info.Size(),
 		Mode:    info.Mode(),
-		ModTime: info.ModTime(),
+		ModTime: info.ModTime().UTC(),
 		IsDir:   info.IsDir(),
 	}
 }

@@ -21,7 +21,7 @@ func CreateStats(dir string, policy func(string) bool) (Stats, error) {
 		if err != nil {
 				return err
 		}
-		if !policy(path) {
+		if !policy(path) || path==dir {
 			return nil
 		}
 
@@ -29,6 +29,8 @@ func CreateStats(dir string, policy func(string) bool) (Stats, error) {
 		if err != nil {
 			return err
 		}
+
+		path = path[len(dir)+1:] // exclude dir prefix
 		stats[path] = CloneInfo(os.FileInfo(fileInfo))
 		return nil
 	}
