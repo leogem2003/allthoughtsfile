@@ -1,13 +1,14 @@
 package atf
+
 import (
 	"flag"
 	"hash/fnv"
 	"io"
 	"log"
 	"math/rand"
-	"strings"
-	"strconv"
 	"os"
+	"strconv"
+	"strings"
 )
 
 // Join path parts using OS separator
@@ -31,7 +32,6 @@ func SettingsFlag(target *string) {
 	flag.StringVar(target, "settings", DefaultSettings, "path to settings.json")
 }
 
-
 func DebugFlag(target *bool) {
 	flag.BoolVar(target, "debug", false, "enable debugging")
 }
@@ -49,19 +49,16 @@ func SetDebugMode(debug bool) {
 }
 
 func HashString(s string) uint64 {
-    h := fnv.New64a()
-    h.Write([]byte(s))
-    return h.Sum64()
+	h := fnv.New64a()
+	h.Write([]byte(s))
+	return h.Sum64()
 }
 
 func RemovePrefix(p string, l []string) []string {
 	result := make([]string, len(l))
 	for i, s := range l {
-		if strings.HasPrefix(s, p) {
-			result[i] = s[len(p):]
-		} else {
-			result[i] = s
-		}
+		s = strings.TrimPrefix(s, p)	
+		result[i] = strings.TrimPrefix(s, string(os.PathSeparator))
 	}
 	return result
 }

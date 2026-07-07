@@ -2,20 +2,19 @@ package atf
 
 import (
 	"slices"
+	"maps"
 	"testing"
-	"os"
 	"path/filepath"
 	"fmt"
 )
 
-func testPolicy(policy func(string)bool, files []string, expected []string,
+func testPolicy(policy FilterFunc, dir string, expected []string,
 	info string, t *testing.T) {
-	selected := make([]string, 0)
-	for _,f := range files {
-		if policy(f){
-			selected = append(selected, f)	
-		}
+	stats, err := CreateStats(dir, policy)
+	if err != nil {
+		t.Errorf("Error while creating stats: %v", err)
 	}
+	selected := slices.Collect(maps.Keys(stats))
 	slices.Sort(selected)
 	slices.Sort(expected)
 	if !slices.Equal(selected, expected) {
@@ -24,55 +23,18 @@ func testPolicy(policy func(string)bool, files []string, expected []string,
 	}	
 }
 
-func makeTmp(tmp string, p []string) []string {
-	tmpList := make([]string,0)
-	for _, f := range p {
-		tmpList = append(tmpList, PathJoin([]string{tmp, f}))
-	}
-
-	return tmpList
-}
-
 func TestExcludeDots(t *testing.T) {
 	tmp := filepath.Clean(GetTmpName([]string{"atf", "test_policy"}))
 	files := []string { "a/.b/file.txt", "a/b/file.txt", "a/b/.file.txt"}
-	folders := []string {"a", "a/.b", "a/b" }
-	
-	tmpFolders := make([]string,0, len(folders))
-	for _, f := range folders {
-		tmpFolder := PathJoin([]string{tmp, f})	
-		tmpFolders = append(tmpFolders, tmpFolder)
-		if err := os.MkdirAll(tmpFolder, 0755); err != nil {
-			t.Fatalf("Cannot create directory: %v", err)
-		}
-	}
-
-	
-	tmpFiles := make([]string,0, len(files))
-	for _, f := range files {
-		tmpFile := PathJoin([]string{tmp, f})	
-		tmpFiles = append(tmpFiles, tmpFile)
-		if err := os.WriteFile(tmpFile, []byte{}, 0644); err != nil {
-			t.Fatalf("Cannot write file: %v", err)
-		}
-	}
+	MakePlayground(tmp, files)
 
 	expectedExcludeDots := []string {"a","a/b","a/b/file.txt"}
-	tmpExcDots := makeTmp(tmp, expectedExcludeDots)
-
-	tmpTot := append(tmpFiles, tmpFolders...)
-
 	expectedExcludeDirs := []string {"a","a/b","a/b/file.txt", "a/b/.file.txt"}
-	tmpExcDirs := makeTmp(tmp, expectedExcludeDirs)
-
 	expectedExcludeFiles := []string {"a","a/b","a/b/file.txt", "a/.b", "a/.b/file.txt"}
-	tmpExcFiles := makeTmp(tmp, expectedExcludeFiles)
-	
 	expectedExcludeSuffix := []string{"a", "a/b", "a/.b"}
-	tmpExcSuffix := makeTmp(tmp, expectedExcludeSuffix)
 
-	testPolicy(IgnoreDot, tmpTot, tmpExcDots, "IgnoreDot", t)
-	testPolicy(IgnoreDotFolders, tmpTot, tmpExcDirs, "IgnoreDotFolders", t)
-	testPolicy(IgnoreDotFiles, tmpTot, tmpExcFiles, "IgnoreDotFiles", t)
-	testPolicy(MakeIgnoreSuffix("file.txt"), tmpTot, tmpExcSuffix, "ExcludeSuffix", t)
+	testPolicy(IgnoreDot, tmp, expectedExcludeDots, "IgnoreDot", t)
+	testPolicy(IgnoreDotFolders, tmp, expectedExcludeDirs, "IgnoreDotFolders", t)
+	testPolicy(IgnoreDotFiles, tmp, expectedExcludeFiles, "IgnoreDotFiles", t)
+	testPolicy(MakeIgnoreSuffix("file.txt"), tmp, expectedExcludeSuffix, "ExcludeSuffix", t)
 }

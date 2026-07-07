@@ -1,10 +1,10 @@
 package main
 
 import (
-	"io"
 	"encoding/json"
-	"fmt"
 	"flag"
+	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -19,33 +19,42 @@ import (
 
 const DBNAME = ".allthoughtsfile"
 const CHUNK_SIZE = 1024
+
 var ACK = []byte(":ACK")
 var Usage = func() {
-	fmt.Printf("Usage: %s [OPTIONS] <dir>\nSynchronizes a directory across devices\n", os.Args[0]) 
+	fmt.Printf("Usage: %s [OPTIONS] <dir>\nSynchronizes a directory across devices\n", os.Args[0])
 	flag.PrintDefaults()
-}	
+}
 
 var errorLog = log.New(os.Stderr, "ERROR: ", 0)
 var SendLock = make(chan bool, 1)
 
 func main() {
 	var settingsPath string
-	var debug bool
-	var create bool
+	var debug, reset bool
+	var filter string
 	
+	// TODO gitignore-style settings instead of filter
 	atf.SettingsFlag(&settingsPath)
 	atf.DebugFlag(&debug)
-	flag.BoolVar(&create, "create", false, "create a new db")
+	flag.BoolVar(&reset, "reset", false, "reset DB")
+	flag.StringVar(&filter, "filter", "AllowEverything",
+		fmt.Sprintf("filter filename. Options: %v", atf.PolicyNames))
 
 	flag.Usage = Usage
 	flag.Parse()
+
+	filterFunc, ok := atf.Policies[filter]
+	if !ok {
+		errorLog.Fatalf("Invalid filter name, expected %v, got %s", atf.PolicyNames, filter)
+	}
 
 	dir := flag.Arg(0)
 	log.Printf("Creating stats...")
 	excludeDB := atf.MakeIgnoreSuffix(DBNAME)
 
 	policy := func(p string) bool {
-		return excludeDB(p) && p != dir
+		return excludeDB(p) && p != dir && filterFunc(p)
 	}
 
 	file, err := os.Open(settingsPath)
@@ -58,7 +67,7 @@ func main() {
 		errorLog.Fatalf("Failed to read file: %v", err)
 	}
 	file.Close()
-	
+
 	var settings dc.ConnectionSettings
 	if err := json.Unmarshal(bytes, &settings); err != nil {
 		errorLog.Fatalf("Invalid settings: %v", err)
@@ -74,15 +83,23 @@ func main() {
 	go StateLog(conn)
 
 	statsFileName := GetStatsDB(dir)
-	oldStats, err := LoadStats(dir)
-	if err != nil {
-		if os.IsNotExist(err) { // new DB: empty stats
-			log.Println("Creating new folder database")
-			if err := os.WriteFile(statsFileName, []byte{}, 0644); err != nil {
-				errorLog.Fatalf("Failed creating stats file: %v", err)
+	var oldStats atf.Stats
+	if reset {
+		log.Println("erasing existing database")
+		if err := os.WriteFile(statsFileName, []byte{}, 0644); err != nil {
+			errorLog.Fatalf("Failed creating stats file: %v", err)
+		}
+	} else {
+		oldStats, err = LoadStats(dir)
+		if err != nil {
+			if os.IsNotExist(err) { // new DB: empty stats
+				log.Println("Creating new folder database")
+				if err := os.WriteFile(statsFileName, []byte{}, 0644); err != nil {
+					errorLog.Fatalf("Failed creating stats file: %v", err)
+				}
+			} else {
+				errorLog.Fatalf("Cannot load new stats: %v", err)
 			}
-		} else {
-			errorLog.Fatalf("Cannot load new stats: %v", err)
 		}
 	}
 
@@ -90,22 +107,22 @@ func main() {
 	if err != nil {
 		errorLog.Fatalf("Cannot create new stats: %v", err)
 	}
-	
+
 	added := atf.RemovePrefix(dir, atf.StatsKeyDiff(newStats, oldStats))
 	deleted := atf.RemovePrefix(dir, atf.StatsKeyDiff(oldStats, newStats))
 	modified := atf.RemovePrefix(dir, atf.StatsValueDiff(newStats, oldStats))
-	
+
 	updater := make(chan []string, 3)
 	go SendUpdates(conn, added, deleted, modified)
 	go RecvUpdates(conn, updater)
-	remoteAdded := <- updater
-	remoteDeleted := <- updater
-	remoteModified := <- updater
-	<- SendLock
-	
-	log.Printf("sent: %#v %#v %#v\n", added, deleted, modified)
-	log.Printf("received: %#v %#v %#v\n", remoteAdded, remoteDeleted, remoteModified)
-	
+	remoteAdded := <-updater
+	remoteDeleted := <-updater
+	remoteModified := <-updater
+	<-SendLock
+
+	log.Printf("local changes: %d new, %d deleted, %d modified\n", len(added), len(deleted), len(modified))
+	log.Printf("remote changes: %d new, %d deleted, %d modified\n", len(remoteAdded), len(remoteDeleted), len(remoteModified))
+
 	changed := append(added, modified...)
 	remoteChanged := append(remoteAdded, remoteModified...)
 	toRequest, err := LatestModSolver(conn, newStats, changed, remoteChanged)
@@ -114,15 +131,15 @@ func main() {
 	}
 
 	toDelete, err := LatestModSolver(conn, newStats, modified, remoteDeleted) // only conflict possible: modified locally deleted remotely
-	log.Printf("To download: %#v", toRequest)
-	log.Printf("To delete: %#v", toDelete)
-	
+	log.Printf("To download: %d", len(toRequest))
+	log.Printf("To delete: %d", len(toDelete))
+
 	if err := deleteFiles(dir, toDelete); err != nil {
 		log.Fatalf("Error while deleting files: %v", err)
 	}
-	
+
 	closeChannel := make(chan bool, 1)
-	proxy1, proxy2 := dc.DualDispatch(conn, closeChannel)	
+	proxy1, proxy2 := dc.DualDispatch(conn, closeChannel)
 	errChannel := make(chan error, 1)
 
 	var wg sync.WaitGroup
@@ -136,13 +153,13 @@ func main() {
 		go SendFiles(proxy2, newStats, dir, &wg, errChannel)
 	}
 	go func() {
-		err := <- errChannel
+		err := <-errChannel
 		errorLog.Fatalf("Error: %v", err)
 	}()
 
 	wg.Wait()
 	closeChannel <- true
-	
+
 	statsBytes, err := json.Marshal(newStats)
 	if err != nil {
 		log.Fatalf("Error: cannot serialize new stats: %v", err)
@@ -151,7 +168,7 @@ func main() {
 	if err := os.WriteFile(statsFileName, statsBytes, 0644); err != nil {
 		errorLog.Fatalf("Failed writing stats file: %v", err)
 	}
-	
+
 	log.Printf("Closing")
 }
 
@@ -162,10 +179,10 @@ func GetStatsDB(dir string) string {
 func LoadStats(dir string) (atf.Stats, error) {
 	statsPath := GetStatsDB(dir)
 	file, err := os.Open(statsPath)
-	defer file.Close()
 	if err != nil {
 		return make(atf.Stats), err
 	}
+	defer file.Close()
 
 	bytes, err := io.ReadAll(file)
 	if err != nil {
@@ -180,26 +197,26 @@ func PathsToByte(paths []string) []byte {
 }
 
 func PathsFromByte(b []byte) []string {
-	if len(b)==0 {
+	if len(b) == 0 {
 		return []string{}
 	}
 	return strings.Split(string(b), ";")
 }
 
 func SendUpdates(conn *dc.Connection, added, deleted, modified []string) {
-	addedBin := PathsToByte(added)	
-	deletedBin := PathsToByte(deleted)	
-	modifiedBin := PathsToByte(modified)	
-  conn.In <- addedBin
-	conn.In <- deletedBin 
+	addedBin := PathsToByte(added)
+	deletedBin := PathsToByte(deleted)
+	modifiedBin := PathsToByte(modified)
+	conn.In <- addedBin
+	conn.In <- deletedBin
 	conn.In <- modifiedBin
 	SendLock <- true
 }
 
 func RecvUpdates(conn *dc.Connection, updater chan []string) {
-	addedBin := <- conn.Out
-	deletedBin := <- conn.Out
-	modifiedBin := <- conn.Out
+	addedBin := <-conn.Out
+	deletedBin := <-conn.Out
+	modifiedBin := <-conn.Out
 	updater <- PathsFromByte(addedBin)
 	updater <- PathsFromByte(deletedBin)
 	updater <- PathsFromByte(modifiedBin)
@@ -212,7 +229,7 @@ func LatestModSolver(
 ) ([]string, error) {
 	toPull := make([]string, 0)
 	toRequest := make([]string, 0)
-	for _,r := range remote {
+	for _, r := range remote {
 		if slices.Contains(local, r) {
 			toRequest = append(toRequest, r)
 		} else {
@@ -227,7 +244,7 @@ func LatestModSolver(
 
 	go func() {
 		subDB := make(atf.Stats)
-		for _,k := range toSend {
+		for _, k := range toSend {
 			subDB[k] = db[k]
 		}
 		payload, _ := atf.StatsToJSON(subDB)
@@ -235,22 +252,22 @@ func LatestModSolver(
 		lock <- true
 	}()
 
-	remoteDB, err := atf.StatsFromJSON(<- conn.Out)
+	remoteDB, err := atf.StatsFromJSON(<-conn.Out)
 	if err != nil {
 		return toPull, err
 	}
-	for k,v := range remoteDB {
+	for k, v := range remoteDB {
 		if v.ModTime.UnixNano() > db[k].ModTime.UnixNano() {
 			toPull = append(toPull, k)
 		}
 	}
-	<- lock
+	<-lock
 	return toPull, nil
 }
 
 func deleteFiles(dir string, files []string) error {
 	for _, f := range files {
-		if err := os.Remove(filepath.Join(dir,f)); err != nil {
+		if err := os.Remove(filepath.Join(dir, f)); err != nil {
 			return err
 		}
 	}
@@ -260,12 +277,12 @@ func deleteFiles(dir string, files []string) error {
 func StateLog(conn *dc.Connection) {
 	for {
 		log.Printf("conn state changed: %v", <-conn.State)
-	} 
+	}
 }
 
 func DownloadFiles(
-	conn dc.IOChannel, 
-	db atf.Stats, 
+	conn dc.IOChannel,
+	db atf.Stats,
 	dir string,
 	toRequest []string,
 	wg *sync.WaitGroup,
@@ -278,11 +295,11 @@ func DownloadFiles(
 	// downloaded after parents
 	sort.Slice(files,
 		func(a, b int) bool {
-			return len(files[a])<len(files[b])
+			return len(files[a]) < len(files[b])
 		},
 	)
 	log.Printf("DOWNLOAD: Requesting %d files \n", len(files))
-	for _, filename :=  range files {
+	for _, filename := range files {
 		path := filepath.Join(dir, filename)
 		log.Printf("DOWNLOAD: Requesting %s\n", filename)
 		conn.Send([]byte(filename))
@@ -298,7 +315,7 @@ func DownloadFiles(
 				errChannel <- err
 				return
 			}
-		} else {	
+		} else {
 			file, err := os.Create(path)
 			if err != nil {
 				errChannel <- err
@@ -312,16 +329,16 @@ func DownloadFiles(
 				return
 			}
 
-			for  {
+			for {
 				chunk := conn.Recv()
-				received += len(chunk)	
+				received += len(chunk)
 				_, err := file.Write(chunk)
 				if err != nil {
 					file.Close()
 					errChannel <- err
 					return
 				}
-				log.Printf("DOWNLOAD:\treceived %5d/%5d",received,info.Size)
+				log.Printf("DOWNLOAD:\treceived %5d/%5d", received, info.Size)
 				if int64(received) == info.Size {
 					break
 				}
@@ -335,14 +352,13 @@ func DownloadFiles(
 			errChannel <- err
 			return
 		}
-		newInfo := atf.CloneInfo(FSInfo)	
+		newInfo := atf.CloneInfo(FSInfo)
 		db[filename] = newInfo
 	}
 
 	conn.Send([]byte(":OK"))
 	log.Printf("DOWNLOAD: finished requests")
 }
-
 
 func SendFiles(
 	conn dc.IOChannel,
@@ -351,7 +367,7 @@ func SendFiles(
 	wg *sync.WaitGroup,
 	errChannel chan error,
 ) {
-	defer wg.Done()	
+	defer wg.Done()
 	buf := make([]byte, CHUNK_SIZE)
 
 	for {
@@ -370,7 +386,7 @@ func SendFiles(
 		infoBytes, err := json.Marshal(info)
 		if err != nil {
 			errChannel <- err
-			return 
+			return
 		}
 
 		conn.Send(infoBytes)
@@ -379,11 +395,11 @@ func SendFiles(
 		}
 
 		file, err := os.Open(path)
-		defer file.Close()
 		if err != nil {
 			errChannel <- err
 			return
 		}
+		defer file.Close()
 
 		for {
 			n, err := file.Read(buf)
@@ -396,7 +412,7 @@ func SendFiles(
 			if err != nil { // EOF
 				break
 			}
-		}	
+		}
 	}
 
 	log.Printf("SEND: finished requests")

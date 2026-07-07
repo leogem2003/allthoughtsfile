@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync"
-	dc "github.com/leogem2003/directchan"
 	"testing"
+
+	dc "github.com/leogem2003/directchan"
 )
 
 func logWithPrefix(prefix string, r io.Reader) {
@@ -30,11 +32,34 @@ func MakePlayground(root string, files []string) {
 }
 
 
-func DirsEqual(dir1, dir2 string) (bool, error) {
+func DirsEqual(dir1, dir2 string, exclude []string) (bool, error) {
 	d1, err := os.ReadDir(dir1)
 	if err != nil { return false, err }
+	var discard1 []os.DirEntry
+	d1 = slices.DeleteFunc(d1,
+		func (e os.DirEntry) bool {
+			if slices.Contains(exclude, e.Name()) {
+				discard1 = append(discard1, e)
+				return true
+			} else {
+				return false
+			}
+		},
+	)
+
 	d2, err := os.ReadDir(dir2)
 	if err != nil { return false, err }
+	var discard2 []os.DirEntry
+	d2 = slices.DeleteFunc(d1,
+		func (e os.DirEntry) bool {
+			if slices.Contains(exclude, e.Name()) {
+				discard2 = append(discard2, e)
+				return true
+			} else {
+				return false
+			}
+		},
+	)
 
 	if len(d1) != len(d2) { return false, nil }
 
@@ -51,15 +76,28 @@ func DirsEqual(dir1, dir2 string) (bool, error) {
 
 		// Recurse if it's a directory
 		if d1[i].IsDir() {
-			equal, err := DirsEqual(filepath.Join(dir1, d1[i].Name()), filepath.Join(dir2, d2[i].Name()))
+			equal, err := DirsEqual(filepath.Join(dir1, d1[i].Name()), filepath.Join(dir2, d2[i].Name()), exclude)
 			if !equal || err != nil { return equal, err }
 		}
+	}
+
+	for _, file := range discard1 {
+		if slices.Contains(d2, file) {
+			return false, nil
+		}	
+	}
+
+	
+	for _, file := range discard2 {
+		if slices.Contains(d1, file) {
+			return false, nil
+		}	
 	}
 	return true, nil
 }
  
-func CheckEqual(root1, root2 string, t *testing.T) {
-	equal, err := DirsEqual(root1, root2)
+func CheckEqual(root1, root2 string, t *testing.T, exclude ...string) {
+	equal, err := DirsEqual(root1, root2, exclude)
 	if err != nil {
 		t.Fatalf("Error while comparing dirs: %v", err)
 	} else if !equal {

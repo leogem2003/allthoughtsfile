@@ -1,10 +1,16 @@
-package atf 
+package atf
+
 import (
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
-var slashdot = string(os.PathSeparator)+"."
+
+type FilterFunc = func(string) bool
+
+var slashdot = string(os.PathSeparator) + "."
 
 func AllowEverything(_ string) bool {
 	return true
@@ -45,3 +51,11 @@ func MakeIgnoreSuffix(suffix string) func(string) bool {
 	}
 }
 
+var Policies = map[string]FilterFunc{
+	"AllowEverything":  AllowEverything,
+	"IgnoreDot":        IgnoreDot,
+	"IgnoreDotFolders": IgnoreDotFolders,
+	"IgnoreDotFiles":   IgnoreDotFiles,
+}
+
+var PolicyNames []string = slices.Collect(maps.Keys(Policies))

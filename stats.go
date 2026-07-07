@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type Stats = map[string]FileInfo
@@ -15,13 +16,14 @@ type StatPair struct {
 	Info FileInfo
 }
 
-func CreateStats(dir string, policy func(string) bool) (Stats, error) {
+// TODO separate files ignored by the policy
+func CreateStats(dir string, policy FilterFunc) (Stats, error) {
 	stats := make(Stats)
 	dirFunc := func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-				return err
+			return err
 		}
-		if !policy(path) || path==dir {
+		if !policy(path) || path == dir {
 			return nil
 		}
 
@@ -30,7 +32,9 @@ func CreateStats(dir string, policy func(string) bool) (Stats, error) {
 			return err
 		}
 
-		path = path[len(dir)+1:] // exclude dir prefix
+		path = strings.TrimPrefix(path, dir)
+		path = strings.TrimPrefix(path, string(os.PathSeparator))
+
 		stats[path] = CloneInfo(os.FileInfo(fileInfo))
 		return nil
 	}
@@ -41,8 +45,8 @@ func CreateStats(dir string, policy func(string) bool) (Stats, error) {
 
 // Returns keys that are in a but not in b
 func StatsKeyDiff(a, b Stats) []string {
-	diff := make([]string, 0, 1) 
-	for ka, _ := range a {
+	diff := make([]string, 0, 1)
+	for ka := range a {
 		if _, ok := b[ka]; !ok {
 			diff = append(diff, ka)
 		}
@@ -51,13 +55,12 @@ func StatsKeyDiff(a, b Stats) []string {
 	return diff
 }
 
-
 // Returns keys that are associated with different
 // values in a and b
 func StatsValueDiff(a, b Stats) []string {
-	diff := make([]string, 0, 1) 
+	diff := make([]string, 0, 1)
 	for ka, va := range a {
-	  vb, ok := b[ka];
+		vb, ok := b[ka]
 		if ok && vb != va {
 			diff = append(diff, ka)
 		}

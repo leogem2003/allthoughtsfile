@@ -13,9 +13,7 @@ var root1, root2, settingsPath string
 
 func TestMain(m *testing.M) {
 	root1 = atf.GetTmpName([]string{"atf", "test_cli", "src"})
-	atf.MakePlayground(root1, []string{"a/f1.txt", "a/f2.txt", "b/f1.txt"})
 	root2 = atf.GetTmpName([]string{"atf", "test_cli", "dest"})
-	atf.MakePlayground(root2, []string{""})
 	var err error
 	settingsPath, err = atf.MakeSettings("atf")
 	if err != nil {
@@ -23,13 +21,15 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	code := m.Run()
-	os.RemoveAll(root1)
-	os.RemoveAll(root2)
 	os.RemoveAll(settingsPath)
 	os.Exit(code)
 }
 
 func Test(t *testing.T) {
+	os.RemoveAll(root1)
+	os.RemoveAll(root2)
+	atf.MakePlayground(root1, []string{"a/f1.txt", "a/f2.txt", "b/f1.txt", ".venv/python", ".zshrc"})
+	atf.MakePlayground(root2, []string{""})
 	arg1 := []string{"run", "main.go", "--debug", "--settings", settingsPath, root1}
 	arg2 := []string{"run", "main.go", "--debug", "--settings", settingsPath, root2}
 	atf.RunPrg(arg1,arg2,t)
@@ -46,3 +46,24 @@ func Test(t *testing.T) {
 	atf.CheckEqual(root1,root2,t)
 }
 
+func TestExclude(t *testing.T) {
+	arg1 := []string{"run", "main.go", "--debug", "--settings", settingsPath, "--filter", "IgnoreDotFolders", root1}
+	arg2 := []string{"run", "main.go", "--debug", "--settings", settingsPath, "--filter", "IgnoreDotFolders", root2}
+	os.RemoveAll(root1)
+	os.RemoveAll(root2)
+	atf.MakePlayground(root1, []string{"a/f1.txt", "a/f2.txt", "b/f1.txt", "src/.venv/python", ".zshrc"})
+	atf.MakePlayground(root2, []string{""})
+	atf.RunPrg(arg1,arg2,t)
+	atf.CheckEqual(root1,root2,t, ".venv")	
+
+	os.RemoveAll(root1)
+	os.RemoveAll(root2)
+	atf.MakePlayground(root1, []string{"a/f1.txt", "a/f2.txt", "b/f1.txt", "src/.venv/python", ".zshrc"})
+	atf.MakePlayground(root2, []string{""})
+	arg1 = []string{"run", "main.go", "--debug", "--settings", settingsPath, "--filter", "IgnoreDotFiles", root1}
+	arg2 = []string{"run", "main.go", "--debug", "--settings", settingsPath, "--filter", "IgnoreDotFiles", root2}
+	atf.RunPrg(arg1,arg2,t)
+	
+	atf.CheckEqual(root1,root2,t, ".zshrc")	
+
+}
