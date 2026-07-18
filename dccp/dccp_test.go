@@ -1,14 +1,13 @@
 package main_test 
 import (
 	"log"
-	"math/rand"
+	"crypto/rand"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 
 	dc "github.com/leogem2003/directchan"
-	// server "github.com/leogem2003/directchan/server"
 	atf "github.com/leogem2003/allthoughtsfiles"
 	dccp "github.com/leogem2003/allthoughtsfiles/dccp"
 )
@@ -60,7 +59,7 @@ func TestFile(t *testing.T) {
 			return
 		}
 		sync <- true
-		err = dccp.Send(conn1, input_path)
+		err = dccp.Send(conn1, input_path, false, "")
 		if err != nil {
 			t.Errorf("Error while sending: %v", err)
 		}
@@ -77,7 +76,7 @@ func TestFile(t *testing.T) {
 	}
 
 	<-sync
-	err = dccp.Receive(conn2, out_dir)
+	err = dccp.Receive(conn2, out_dir, false)
 	if err != nil {
 		t.Errorf("Error while receiving: %v", err)
 	}
@@ -140,7 +139,7 @@ func TestDir(t *testing.T) {
 			return
 		}
 		sync <- true
-		err = dccp.Send(conn1, in_dir)
+		err = dccp.Send(conn1, in_dir, false, "")
 		if err != nil {
 			t.Errorf("Error while sending: %v", err)
 		}
@@ -157,7 +156,7 @@ func TestDir(t *testing.T) {
 	}
 
 	<-sync
-	err = dccp.Receive(conn2, out_dir)
+	err = dccp.Receive(conn2, out_dir, false)
 	if err != nil {
 		t.Errorf("Error while receiving: %v", err)
 	}
@@ -232,7 +231,7 @@ func TestCrypt(t *testing.T) {
 		}
 		chann := dc.NewAESConnection(conn1, cypher)
 		sync <- true
-		err = dccp.Send(chann, input_path)
+		err = dccp.Send(chann, input_path, false, "")
 		if err != nil {
 			t.Errorf("Error while sending: %v", err)
 		}
@@ -249,7 +248,7 @@ func TestCrypt(t *testing.T) {
 	}
 	chann := dc.NewAESConnection(conn2, cypher)
 	<-sync
-	err = dccp.Receive(chann, out_dir)
+	err = dccp.Receive(chann, out_dir, false)
 	if err != nil {
 		t.Errorf("Error while receiving: %v", err)
 	}
@@ -325,3 +324,31 @@ func TestAES(t *testing.T) {
 	os.RemoveAll(root2)
 	os.RemoveAll(settingsPath)
 }
+
+
+func TestStream(t *testing.T) {
+	root1 := atf.GetTmpName([]string{"dccp", "test_stream", "src"})
+	atf.MakePlayground(root1, []string{"f1.txt"})
+	root2 := atf.GetTmpName([]string{"dccp", "test_stream", "dest"})
+	atf.MakePlayground(root2, []string{""})
+
+	filePath := filepath.Join(root1, "f1.txt")
+	os.WriteFile(filePath, []byte("hello"), 0644)
+
+	settingsPath, err := atf.MakeSettings("dccp")
+	if err != nil {
+		t.Fatalf("Error while writing settings: %v", err)
+	}
+
+	arg1 := []string{"run", "main.go",
+		"--debug", "--stream", "--settings", settingsPath, "send", root1}
+	arg2 := []string{"run", "main.go",
+		"--debug", "--stream", "--settings", settingsPath, "recv", root2}
+	atf.RunPrg(arg1,arg2,t)
+	atf.CheckEqual(root1,root2,t)	
+	
+	os.RemoveAll(root1)
+	os.RemoveAll(root2)
+	os.RemoveAll(settingsPath)
+}
+
